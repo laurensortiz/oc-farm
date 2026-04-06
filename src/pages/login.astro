@@ -1,0 +1,103 @@
+---
+import { checkCredentials, createSessionToken, COOKIE_NAME, verifySessionToken } from '../lib/auth';
+import '../styles/global.css';
+
+// Si ya está autenticado, redirigir al inicio
+const sessionCookie = Astro.cookies.get(COOKIE_NAME);
+if (sessionCookie && verifySessionToken(sessionCookie.value)) {
+  return Astro.redirect('/');
+}
+
+const redirect = Astro.url.searchParams.get('redirect') ?? '/';
+let error = '';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const username = form.get('username')?.toString().trim() ?? '';
+  const password = form.get('password')?.toString() ?? '';
+
+  if (checkCredentials(username, password)) {
+    Astro.cookies.set(COOKIE_NAME, createSessionToken(), {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7, // 7 días
+    });
+    return Astro.redirect(redirect);
+  } else {
+    error = 'Usuario o contraseña incorrectos';
+  }
+}
+---
+
+<!doctype html>
+<html lang="es" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <title>Iniciar sesión | OC Farm</title>
+  </head>
+  <body class="bg-base-200 min-h-screen flex items-center justify-center px-4">
+
+    <div class="w-full max-w-sm space-y-6">
+
+      <!-- Logo / título -->
+      <div class="text-center space-y-1">
+        <div class="text-5xl">🐄</div>
+        <h1 class="text-2xl font-bold">OC Farm</h1>
+        <p class="text-sm text-base-content/50">Control de ganado</p>
+      </div>
+
+      <!-- Card de login -->
+      <div class="card bg-base-100 shadow-md">
+        <div class="card-body p-6 space-y-4">
+
+          <h2 class="text-lg font-semibold text-center">Iniciar sesión</h2>
+
+          {error && (
+            <div class="alert alert-error text-sm py-2">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3a9 9 0 100 18A9 9 0 0012 3z" />
+              </svg>
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form method="POST" class="space-y-4">
+
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Usuario</label>
+              <input
+                type="text"
+                name="username"
+                class="input input-bordered w-full"
+                placeholder="admin"
+                autocomplete="username"
+                autofocus
+                required
+              />
+            </div>
+
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Contraseña</label>
+              <input
+                type="password"
+                name="password"
+                class="input input-bordered w-full"
+                placeholder="••••••"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            <button type="submit" class="btn btn-soft btn-primary w-full">
+              Entrar
+            </button>
+
+          </form>
+        </div>
+      </div>
+
+    </div>
+  </body>
+</html>

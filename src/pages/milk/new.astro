@@ -1,0 +1,128 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/db/index';
+import { animals, milkProduction } from '../../lib/db/schema';
+import { shiftLabel } from '../../lib/labels';
+import { eq } from 'drizzle-orm';
+
+let error = '';
+
+const preselectedAnimalId = Astro.url.searchParams.get('animalId') ?? '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+
+    const animalIdRaw = form.get('animal_id')?.toString() || null;
+    const animalId    = animalIdRaw ? parseInt(animalIdRaw) : null;
+    const date        = form.get('date')?.toString() || null;
+    const shift       = form.get('shift')?.toString() as 'morning' | 'afternoon' | null || null;
+    const liters      = form.get('liters')?.toString() || null;
+    const notes       = form.get('notes')?.toString().trim() || null;
+
+    if (!animalId) throw new Error('Debe seleccionar un animal');
+    if (!date)     throw new Error('La fecha es obligatoria');
+    if (!liters)   throw new Error('Los litros son obligatorios');
+
+    await db.insert(milkProduction).values({
+      animalId,
+      date,
+      shift: shift || null,
+      liters,
+      notes,
+    });
+
+    return Astro.redirect(`/animals/${animalId}`);
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Error al guardar';
+  }
+}
+
+// Solo bovinos
+const animalList = await db
+  .select({ id: animals.id, code: animals.code, name: animals.name })
+  .from(animals)
+  .where(eq(animals.species, 'bovine'))
+  .orderBy(animals.code);
+
+const today = new Date().toISOString().split('T')[0];
+---
+
+<Layout title="Producción de leche">
+  <div class="space-y-5">
+
+    <div class="flex items-center gap-2">
+      <a href="/animals" class="btn btn-ghost btn-sm btn-square">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="text-xl font-bold">Producción de leche</h1>
+    </div>
+
+    {error && <div class="alert alert-error text-sm"><span>{error}</span></div>}
+
+    <form method="POST" class="space-y-4">
+
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5 space-y-4">
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Animal (bovino) *</label>
+            <select name="animal_id" class="select select-bordered w-full" required>
+              <option value="">Seleccionar animal...</option>
+              {animalList.map((a) => (
+                <option value={a.id} selected={preselectedAnimalId === String(a.id)}>
+                  🐄 {a.name ? `${a.name} (${a.code})` : a.code}
+                </option>
+              ))}
+            </select>
+            {animalList.length === 0 && (
+              <p class="text-xs text-warning mt-0.5">No hay bovinos registrados.</p>
+            )}
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Fecha *</label>
+              <input type="date" name="date" class="input input-bordered w-full" value={today} required />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Turno</label>
+              <select name="shift" class="select select-bordered w-full">
+                <option value="">Sin especificar</option>
+                {Object.entries(shiftLabel).map(([val, label]) => (
+                  <option value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Litros *</label>
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              name="liters"
+              class="input input-bordered w-full"
+              placeholder="12.5"
+              required
+            />
+          </div>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Observaciones</label>
+            <textarea name="notes" class="textarea textarea-bordered w-full" rows="2" placeholder="Notas adicionales..."></textarea>
+          </div>
+
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-soft btn-primary w-full text-base">
+        Guardar producción
+      </button>
+
+    </form>
+  </div>
+</Layout>

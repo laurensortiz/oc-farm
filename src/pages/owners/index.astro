@@ -1,0 +1,57 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/db/index';
+import { owners, animals } from '../../lib/db/schema';
+import { eq, count } from 'drizzle-orm';
+
+const ownerList = await db
+  .select({
+    id: owners.id,
+    name: owners.name,
+    phone: owners.phone,
+    email: owners.email,
+    animalCount: count(animals.id),
+  })
+  .from(owners)
+  .leftJoin(animals, eq(animals.ownerId, owners.id))
+  .groupBy(owners.id, owners.name, owners.phone, owners.email)
+  .orderBy(owners.name);
+---
+
+<Layout title="Dueños">
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold">Dueños</h1>
+      <a href="/owners/new" class="btn btn-soft btn-primary btn-sm">+ Nuevo</a>
+    </div>
+
+    {ownerList.length === 0 ? (
+      <div class="text-center py-12 text-base-content/50">
+        <p class="text-4xl mb-2">👤</p>
+        <p>No hay dueños registrados</p>
+        <a href="/owners/new" class="btn btn-soft btn-primary btn-sm mt-3">Registrar primero</a>
+      </div>
+    ) : (
+      <div class="space-y-3">
+        {ownerList.map((owner) => (
+          <a href={`/owners/${owner.id}`} class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow block">
+            <div class="card-body p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="font-semibold">{owner.name}</div>
+                  <div class="text-sm text-base-content/60 space-x-2">
+                    {owner.phone && <span>📞 {owner.phone}</span>}
+                    {owner.email && <span>✉️ {owner.email}</span>}
+                  </div>
+                </div>
+                <div class="badge badge-outline badge-sm">
+                  {owner.animalCount} {Number(owner.animalCount) === 1 ? 'animal' : 'animales'}
+                </div>
+              </div>
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
+</Layout>

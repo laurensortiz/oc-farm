@@ -1,0 +1,336 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import { db } from '../../../lib/db/index';
+import { speciesLabel, sexLabel, statusLabel, statusBadgeClass, speciesIcon, medicalRecordTypeLabel, shiftLabel, animalEventTypeLabel } from '../../../lib/labels';
+import { animals, animalPhotos, medicalRecords, milkProduction, reproductiveRecords, animalEvents, owners } from '../../../lib/db/schema';
+import { eq, desc, or } from 'drizzle-orm';
+
+const { id } = Astro.params;
+const animalId = parseInt(id ?? '0');
+
+if (!animalId) return Astro.redirect('/animals');
+
+const [animal] = await db.select().from(animals).where(eq(animals.id, animalId));
+if (!animal) return Astro.redirect('/animals');
+
+const [owner] = animal.ownerId
+  ? await db.select({ id: owners.id, name: owners.name }).from(owners).where(eq(owners.id, animal.ownerId))
+  : [null];
+
+// Padre/madre por referencia interna
+const [fatherAnimal] = animal.fatherAnimalId
+  ? await db.select({ id: animals.id, code: animals.code, name: animals.name }).from(animals).where(eq(animals.id, animal.fatherAnimalId))
+  : [null];
+const [motherAnimal] = animal.motherAnimalId
+  ? await db.select({ id: animals.id, code: animals.code, name: animals.name }).from(animals).where(eq(animals.id, animal.motherAnimalId))
+  : [null];
+
+// Foto principal
+const [photo] = await db
+  .select({ id: animalPhotos.id })
+  .from(animalPhotos)
+  .where(eq(animalPhotos.animalId, animalId))
+  .limit(1);
+
+// Últimos registros médicos
+const lastMedical = await db
+  .select()
+  .from(medicalRecords)
+  .where(eq(medicalRecords.animalId, animalId))
+  .orderBy(desc(medicalRecords.date))
+  .limit(3);
+
+// Últimos eventos
+const lastEvents = await db
+  .select()
+  .from(animalEvents)
+  .where(eq(animalEvents.animalId, animalId))
+  .orderBy(desc(animalEvents.eventDate))
+  .limit(5);
+
+// Hijos: animales que tienen este animal como padre o madre
+const children = await db
+  .select({
+    id: animals.id,
+    code: animals.code,
+    name: animals.name,
+    species: animals.species,
+    sex: animals.sex,
+    status: animals.status,
+    photoId: animalPhotos.id,
+  })
+  .from(animals)
+  .leftJoin(animalPhotos, eq(animalPhotos.animalId, animals.id))
+  .where(or(
+    eq(animals.fatherAnimalId, animalId),
+    eq(animals.motherAnimalId, animalId)
+  ))
+  .orderBy(animals.code);
+
+// Producción de leche reciente (solo bovinos)
+const lastMilk = animal.species === 'bovine'
+  ? await db
+      .select()
+      .from(milkProduction)
+      .where(eq(milkProduction.animalId, animalId))
+      .orderBy(desc(milkProduction.date))
+      .limit(3)
+  : [];
+---
+
+<Layout title={animal.name ?? animal.code}>
+  <div class="space-y-4">
+    <!-- Encabezado con foto -->
+    <div class="flex items-center gap-2">
+      <a href="/animals" class="btn btn-ghost btn-sm btn-square">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="text-xl font-bold">{animal.name ?? animal.code}</h1>
+      <span class={`badge ml-auto ${statusBadgeClass[animal.status] ?? 'badge-neutral'}`}>
+        {statusLabel[animal.status] ?? animal.status}
+      </span>
+    </div>
+
+    <!-- Foto + datos básicos -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <div class="flex gap-4">
+          <!-- Foto -->
+          <div class="flex-shrink-0">
+            {photo ? (
+              <button
+                id="open-photo-modal"
+                type="button"
+                class="block cursor-zoom-in"
+                title="Ver foto en grande"
+              >
+                <img
+                  src={`/api/photos/${photo.id}`}
+                  alt={animal.name ?? animal.code}
+                  class="w-24 h-24 rounded-xl object-cover hover:opacity-80 transition-opacity"
+                />
+              </button>
+            ) : (
+              <div class="w-24 h-24 rounded-xl bg-base-200 flex items-center justify-center text-4xl">
+                {speciesIcon[animal.species]}
+              </div>
+            )}
+            <a href={`/animals/${animal.id}/photo`} class="btn btn-ghost btn-xs mt-1 w-full">
+              {photo ? 'Cambiar' : '+ Foto'}
+            </a>
+          </div>
+          <!-- Info -->
+          <div class="flex-1 space-y-1 text-sm">
+            <div><span class="text-base-content/50">Código:</span> {animal.code}</div>
+            <div><span class="text-base-content/50">Especie:</span> {speciesLabel[animal.species] ?? animal.species}</div>
+            <div><span class="text-base-content/50">Raza:</span> {animal.breed ?? '—'}</div>
+            <div><span class="text-base-content/50">Sexo:</span> {sexLabel[animal.sex] ?? animal.sex}</div>
+            {animal.birthDate && <div><span class="text-base-content/50">Nacimiento:</span> {animal.birthDate}</div>}
+            {animal.currentWeight && <div><span class="text-base-content/50">Peso:</span> {animal.currentWeight} kg</div>}
+            {animal.marks && <div><span class="text-base-content/50">Señas:</span> {animal.marks}</div>}
+            <div>
+              <span class="text-base-content/50">Dueño:</span>{' '}
+              {owner
+                ? <a href={`/owners/${owner.id}`} class="link link-primary">{owner.name}</a>
+                : <span class="text-base-content/30">No asignado</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        <a href={`/animals/${animal.id}/edit`} class="btn btn-soft btn-sm mt-2">Editar datos</a>
+      </div>
+    </div>
+
+    <!-- Genealogía -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="font-semibold mb-3">Genealogía</h2>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <!-- Padre -->
+          <div class="bg-base-200 rounded-lg p-3">
+            <div class="text-xs text-base-content/50 mb-1 uppercase tracking-wide">Padre</div>
+            {fatherAnimal ? (
+              <a href={`/animals/${fatherAnimal.id}`} class="font-medium link link-primary">
+                {fatherAnimal.name ?? fatherAnimal.code}
+              </a>
+            ) : animal.fatherText ? (
+              <span class="font-medium">{animal.fatherText}</span>
+            ) : (
+              <span class="text-base-content/30 italic">No registrado</span>
+            )}
+          </div>
+          <!-- Madre -->
+          <div class="bg-base-200 rounded-lg p-3">
+            <div class="text-xs text-base-content/50 mb-1 uppercase tracking-wide">Madre</div>
+            {motherAnimal ? (
+              <a href={`/animals/${motherAnimal.id}`} class="font-medium link link-primary">
+                {motherAnimal.name ?? motherAnimal.code}
+              </a>
+            ) : animal.motherText ? (
+              <span class="font-medium">{animal.motherText}</span>
+            ) : (
+              <span class="text-base-content/30 italic">No registrado</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hijos -->
+    {children.length > 0 && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <h2 class="font-semibold mb-3">
+            Hijos
+            <span class="badge badge-outline badge-sm ml-1">{children.length}</span>
+          </h2>
+          <div class="space-y-2">
+            {children.map((child) => (
+              <a
+                href={`/animals/${child.id}`}
+                class="flex items-center gap-3 p-2 rounded-lg hover:bg-base-200 transition-colors"
+              >
+                {child.photoId ? (
+                  <img
+                    src={`/api/photos/${child.photoId}`}
+                    alt={child.name ?? child.code}
+                    class="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div class="w-10 h-10 rounded-lg bg-base-200 flex items-center justify-center text-xl flex-shrink-0">
+                    {speciesIcon[child.species]}
+                  </div>
+                )}
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-sm truncate">{child.name ?? child.code}</div>
+                  <div class="text-xs text-base-content/50">{child.code} · {sexLabel[child.sex] ?? child.sex}</div>
+                </div>
+                <span class={`badge badge-sm flex-shrink-0 ${statusBadgeClass[child.status] ?? 'badge-neutral'}`}>
+                  {statusLabel[child.status] ?? child.status}
+                </span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    <!-- Acciones rápidas -->
+    <div class="grid grid-cols-2 gap-2">
+      <a href={`/medical/new?animalId=${animal.id}`} class="btn btn-soft btn-sm">+ Control médico</a>
+      {animal.species === 'bovine' && (
+        <a href={`/milk/new?animalId=${animal.id}`} class="btn btn-soft btn-sm">+ Producción leche</a>
+      )}
+      {animal.species === 'bovine' && (
+        <a href={`/reproductive/new?animalId=${animal.id}`} class="btn btn-soft btn-sm">+ Reproductivo</a>
+      )}
+      <a href={`/events/new?animalId=${animal.id}`} class="btn btn-soft btn-sm">+ Evento</a>
+    </div>
+
+    <!-- Últimos registros médicos -->
+    {lastMedical.length > 0 && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold">Control médico</h2>
+            <a href={`/animals/${animal.id}/medical`} class="btn btn-ghost btn-xs">Ver todo</a>
+          </div>
+          <div class="space-y-2 mt-2">
+            {lastMedical.map((rec) => (
+              <div class="flex items-center justify-between text-sm border-b border-base-200 pb-2 last:border-0 last:pb-0">
+                <div>
+                  <span class="badge badge-outline badge-sm">{medicalRecordTypeLabel[rec.recordType] ?? rec.recordType}</span>
+                  {rec.medication && <span class="ml-1 text-base-content/60">{rec.medication}</span>}
+                </div>
+                <span class="text-base-content/50 text-xs">{rec.date}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    <!-- Producción de leche reciente -->
+    {lastMilk.length > 0 && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold">Producción de leche</h2>
+            <a href={`/animals/${animal.id}/milk`} class="btn btn-ghost btn-xs">Ver todo</a>
+          </div>
+          <div class="space-y-2 mt-2">
+            {lastMilk.map((m) => (
+              <div class="flex items-center justify-between text-sm">
+                <span>{m.liters} L {m.shift ? `(${shiftLabel[m.shift] ?? m.shift})` : ''}</span>
+                <span class="text-base-content/50 text-xs">{m.date}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    <!-- Historial de eventos -->
+    {lastEvents.length > 0 && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <div class="flex items-center justify-between">
+            <h2 class="font-semibold">Historial</h2>
+            <a href={`/animals/${animal.id}/events`} class="btn btn-ghost btn-xs">Ver todo</a>
+          </div>
+          <div class="space-y-2 mt-2">
+            {lastEvents.map((ev) => (
+              <div class="flex items-center gap-2 text-sm border-b border-base-200 pb-2 last:border-0 last:pb-0">
+                <span class="badge badge-outline badge-xs">{animalEventTypeLabel[ev.eventType] ?? ev.eventType}</span>
+                <span class="flex-1 text-base-content/70">{ev.title ?? ev.description ?? ''}</span>
+                <span class="text-base-content/40 text-xs">{ev.eventDate}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {animal.notes && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <h2 class="font-semibold">Observaciones</h2>
+          <p class="text-sm text-base-content/70 mt-1">{animal.notes}</p>
+        </div>
+      </div>
+    )}
+  </div>
+
+  <!-- Modal foto -->
+  {photo && (
+    <dialog id="photo-modal" class="modal">
+      <div class="modal-box p-2 max-w-sm w-full">
+        <img
+          src={`/api/photos/${photo.id}`}
+          alt={animal.name ?? animal.code}
+          class="w-full rounded-xl object-contain max-h-[80vh]"
+        />
+        <div class="modal-action mt-2">
+          <form method="dialog">
+            <button class="btn btn-soft btn-sm w-full">Cerrar</button>
+          </form>
+        </div>
+      </div>
+      <form method="dialog" class="modal-backdrop">
+        <button>cerrar</button>
+      </form>
+    </dialog>
+  )}
+
+</Layout>
+
+{photo && (
+  <script>
+    document.getElementById('open-photo-modal')?.addEventListener('click', () => {
+      (document.getElementById('photo-modal') as HTMLDialogElement)?.showModal();
+    });
+  </script>
+)}

@@ -1,0 +1,35 @@
+{
+  "name": "oc-farm",
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "start": "node dist/server/entry.mjs",
+    "preview": "astro preview",
+    "astro": "astro",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx src/lib/db/seed.ts"
+  },
+  "dependencies": {
+    "@astrojs/node": "^10.0.4",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/pg": "^8.20.0",
+    "astro": "^6.1.1",
+    "daisyui": "^5.5.19",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.20.0",
+    "tailwindcss": "^4.2.2",
+    "vite-plugin-pwa": "^1.2.0",
+    "workbox-window": "^7.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

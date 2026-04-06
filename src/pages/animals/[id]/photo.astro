@@ -1,0 +1,153 @@
+---
+import Layout from '../../../layouts/Layout.astro';
+import { db } from '../../../lib/db/index';
+import { animals, animalPhotos } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+const { id } = Astro.params;
+const animalId = parseInt(id ?? '0');
+if (!animalId) return Astro.redirect('/animals');
+
+const [animal] = await db
+  .select({ id: animals.id, name: animals.name, code: animals.code })
+  .from(animals)
+  .where(eq(animals.id, animalId));
+if (!animal) return Astro.redirect('/animals');
+
+const [existing] = await db
+  .select({ id: animalPhotos.id })
+  .from(animalPhotos)
+  .where(eq(animalPhotos.animalId, animalId))
+  .limit(1);
+
+let error = '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    const file = form.get('photo') as File | null;
+
+    if (!file || file.size === 0) throw new Error('Selecciona una foto');
+
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      throw new Error('Solo se aceptan imágenes JPG, PNG o WebP');
+    }
+
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      throw new Error('La imagen no puede superar 5MB');
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    if (existing) {
+      // Reemplazar foto existente
+      await db
+        .update(animalPhotos)
+        .set({
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          photoData: buffer,
+          uploadedAt: new Date(),
+        })
+        .where(eq(animalPhotos.id, existing.id));
+    } else {
+      // Insertar nueva foto
+      await db.insert(animalPhotos).values({
+        animalId,
+        fileName: file.name,
+        mimeType: file.type,
+        fileSize: file.size,
+        photoData: buffer,
+      });
+    }
+
+    return Astro.redirect(`/animals/${animalId}`);
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Error al subir la foto';
+  }
+}
+---
+
+<Layout title="Foto del animal">
+  <div class="space-y-5">
+
+    <div class="flex items-center gap-2">
+      <a href={`/animals/${animal.id}`} class="btn btn-ghost btn-sm btn-square">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </a>
+      <div>
+        <h1 class="text-xl font-bold">Foto del animal</h1>
+        <p class="text-sm text-base-content/60">{animal.name ?? animal.code}</p>
+      </div>
+    </div>
+
+    {error && <div class="alert alert-error text-sm"><span>{error}</span></div>}
+
+    <!-- Foto actual -->
+    {existing && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 items-center">
+          <p class="text-sm text-base-content/60 mb-2">Foto actual</p>
+          <img
+            src={`/api/photos/${existing.id}`}
+            alt={animal.name ?? animal.code}
+            class="w-48 h-48 object-cover rounded-xl"
+          />
+        </div>
+      </div>
+    )}
+
+    <!-- Formulario de subida -->
+    <form method="POST" enctype="multipart/form-data" class="space-y-4">
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5 space-y-4">
+          <h2 class="font-semibold text-base border-b border-base-300 pb-2">
+            {existing ? 'Cambiar foto' : 'Subir foto'}
+          </h2>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Seleccionar imagen</label>
+            <input
+              type="file"
+              name="photo"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              class="file-input file-input-bordered w-full"
+              required
+            />
+            <p class="text-xs text-base-content/50">JPG, PNG o WebP · Máximo 5MB</p>
+          </div>
+
+          <!-- Preview client-side -->
+          <div id="preview-container" class="hidden">
+            <p class="text-sm text-base-content/60 mb-2">Vista previa</p>
+            <img id="preview-img" src="" alt="preview" class="w-48 h-48 object-cover rounded-xl" />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-soft btn-primary w-full text-base">
+        {existing ? 'Reemplazar foto' : 'Guardar foto'}
+      </button>
+    </form>
+
+  </div>
+</Layout>
+
+<script>
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const container = document.getElementById('preview-container');
+  const img = document.getElementById('preview-img') as HTMLImageElement;
+
+  input?.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (!file || !container || !img) return;
+    const url = URL.createObjectURL(file);
+    img.src = url;
+    container.classList.remove('hidden');
+  });
+</script>

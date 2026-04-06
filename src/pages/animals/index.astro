@@ -1,0 +1,152 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/db/index';
+import { animals, owners, animalPhotos } from '../../lib/db/schema';
+import { speciesLabel, statusLabel, statusBadgeClass, speciesIcon, sexLabel } from '../../lib/labels';
+import { eq, ilike, or, and } from 'drizzle-orm';
+
+const url = Astro.url;
+const speciesFilter = url.searchParams.get('species') ?? '';
+const statusFilter  = url.searchParams.get('status') ?? '';
+const ownerFilter   = url.searchParams.get('owner') ?? '';
+const search        = url.searchParams.get('q') ?? '';
+
+const conditions = [];
+if (speciesFilter === 'bovine' || speciesFilter === 'equine') {
+  conditions.push(eq(animals.species, speciesFilter));
+}
+if (statusFilter === 'active' || statusFilter === 'sold' || statusFilter === 'dead' || statusFilter === 'sick') {
+  conditions.push(eq(animals.status, statusFilter));
+}
+if (ownerFilter) {
+  conditions.push(eq(animals.ownerId, parseInt(ownerFilter)));
+}
+if (search) {
+  conditions.push(or(ilike(animals.name, `%${search}%`), ilike(animals.code, `%${search}%`))!);
+}
+
+const where = conditions.length === 1
+  ? conditions[0]
+  : conditions.length > 1
+  ? and(...conditions)
+  : undefined;
+
+const list = await db
+  .select({
+    id: animals.id,
+    code: animals.code,
+    name: animals.name,
+    species: animals.species,
+    breed: animals.breed,
+    sex: animals.sex,
+    status: animals.status,
+    currentWeight: animals.currentWeight,
+    ownerName: owners.name,
+    photoId: animalPhotos.id,
+  })
+  .from(animals)
+  .leftJoin(owners, eq(animals.ownerId, owners.id))
+  .leftJoin(animalPhotos, eq(animalPhotos.animalId, animals.id))
+  .where(where)
+  .orderBy(animals.code);
+
+const ownerList = await db
+  .select({ id: owners.id, name: owners.name })
+  .from(owners)
+  .orderBy(owners.name);
+---
+
+<Layout title="Animales">
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold">Animales</h1>
+      <a href="/animals/new" class="btn btn-soft btn-primary btn-sm">+ Nuevo</a>
+    </div>
+
+    <!-- Búsqueda y filtros -->
+    <form method="get" class="space-y-2">
+      <input
+        type="text"
+        name="q"
+        value={search}
+        placeholder="Buscar por nombre o código..."
+        class="input input-bordered w-full"
+      />
+      <div class="grid grid-cols-2 gap-2">
+        <select name="species" class="select select-bordered">
+          <option value="">Todas las especies</option>
+          <option value="bovine" selected={speciesFilter === 'bovine'}>Bovinos</option>
+          <option value="equine" selected={speciesFilter === 'equine'}>Equinos</option>
+        </select>
+        <select name="status" class="select select-bordered">
+          <option value="">Todos los estados</option>
+          <option value="active" selected={statusFilter === 'active'}>Activos</option>
+          <option value="sick"   selected={statusFilter === 'sick'}>Enfermos</option>
+          <option value="sold"   selected={statusFilter === 'sold'}>Vendidos</option>
+          <option value="dead"   selected={statusFilter === 'dead'}>Muertos</option>
+        </select>
+      </div>
+      <div class="flex gap-2">
+        <select name="owner" class="select select-bordered flex-1">
+          <option value="">Todos los dueños</option>
+          {ownerList.map((o) => (
+            <option value={o.id} selected={ownerFilter === String(o.id)}>{o.name}</option>
+          ))}
+        </select>
+        <button type="submit" class="btn btn-soft btn-square">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
+      </div>
+    </form>
+
+    <!-- Lista de animales -->
+    {list.length === 0 ? (
+      <div class="text-center py-12 text-base-content/50">
+        <p class="text-4xl mb-2">🐄</p>
+        <p>No se encontraron animales</p>
+        <a href="/animals/new" class="btn btn-soft btn-primary btn-sm mt-3">Registrar primero</a>
+      </div>
+    ) : (
+      <div class="grid grid-cols-2 gap-3">
+        {list.map((animal) => (
+          <a href={`/animals/${animal.id}`} class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow block">
+            <div class="card-body p-3">
+              <!-- Thumbnail -->
+              <div class="flex justify-center mb-2">
+                {animal.photoId ? (
+                  <img
+                    src={`/api/photos/${animal.photoId}`}
+                    alt={animal.name ?? animal.code}
+                    class="w-full h-28 md:h-48 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div class="w-full h-28 md:h-48 rounded-lg bg-base-200 flex items-center justify-center text-4xl">
+                    {speciesIcon[animal.species]}
+                  </div>
+                )}
+              </div>
+              <!-- Info -->
+              <div class="font-semibold truncate text-sm">{animal.name ?? animal.code}</div>
+              <div class="text-xs text-base-content/60 truncate">
+                {animal.code} · {animal.breed ?? 'Sin raza'}
+              </div>
+              {animal.ownerName && (
+                <div class="text-xs text-base-content/40 truncate mt-0.5">👤 {animal.ownerName}</div>
+              )}
+              <div class="flex items-center justify-between mt-1">
+                <span class={`badge badge-xs ${statusBadgeClass[animal.status] ?? 'badge-neutral'}`}>
+                  {statusLabel[animal.status] ?? animal.status}
+                </span>
+                {animal.currentWeight && (
+                  <span class="text-xs text-base-content/40">{animal.currentWeight} kg</span>
+                )}
+              </div>
+            </div>
+          </a>
+        ))}
+      </div>
+    )}
+  </div>
+</Layout>

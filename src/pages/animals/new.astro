@@ -1,0 +1,328 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/db/index';
+import { animals, owners, animalPhotos } from '../../lib/db/schema';
+import { speciesIcon, sexLabel } from '../../lib/labels';
+import { sql } from 'drizzle-orm';
+
+let error = '';
+
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+
+    const customCode    = form.get('code')?.toString().trim() || null;
+    const name          = form.get('name')?.toString().trim() || null;
+    const species       = form.get('species')?.toString() as 'bovine' | 'equine';
+    const breed         = form.get('breed')?.toString().trim() || null;
+    const sex           = form.get('sex')?.toString() as 'male' | 'female';
+    const birthDate     = form.get('birth_date')?.toString() || null;
+    const marks         = form.get('marks')?.toString().trim() || null;
+    const currentWeight = form.get('current_weight')?.toString() || null;
+    const notes         = form.get('notes')?.toString().trim() || null;
+    const ownerIdRaw    = form.get('owner_id')?.toString() || null;
+    const ownerId       = ownerIdRaw ? parseInt(ownerIdRaw) : null;
+
+    // Padre: relación interna tiene prioridad sobre texto libre
+    const fatherAnimalIdRaw = form.get('father_animal_id')?.toString() || null;
+    const fatherAnimalId    = fatherAnimalIdRaw ? parseInt(fatherAnimalIdRaw) : null;
+    const fatherText        = !fatherAnimalId ? (form.get('father_text')?.toString().trim() || null) : null;
+
+    // Madre: igual
+    const motherAnimalIdRaw = form.get('mother_animal_id')?.toString() || null;
+    const motherAnimalId    = motherAnimalIdRaw ? parseInt(motherAnimalIdRaw) : null;
+    const motherText        = !motherAnimalId ? (form.get('mother_text')?.toString().trim() || null) : null;
+
+    if (!species) throw new Error('La especie es obligatoria');
+    if (!sex)     throw new Error('El sexo es obligatorio');
+
+    // Insertar con código temporal para obtener el ID real
+    const [newAnimal] = await db.insert(animals).values({
+      code: customCode ?? `_tmp_${Date.now()}`,
+      name, species, breed, sex, birthDate,
+      marks, currentWeight, notes, ownerId,
+      fatherAnimalId, fatherText,
+      motherAnimalId, motherText,
+    }).returning({ id: animals.id });
+
+    // Si no ingresó código manual, asignar el ID formateado como código
+    if (!customCode) {
+      const autoCode = String(newAnimal.id).padStart(3, '0');
+      await db.update(animals)
+        .set({ code: autoCode })
+        .where(sql`id = ${newAnimal.id}`);
+    }
+
+    // Foto opcional
+    const photoFile = form.get('photo') as File | null;
+    if (photoFile && photoFile.size > 0) {
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+      if (!allowedTypes.includes(photoFile.type)) {
+        throw new Error('Solo se aceptan imágenes JPG, PNG o WebP');
+      }
+      if (photoFile.size > 5 * 1024 * 1024) {
+        throw new Error('La imagen no puede superar 5MB');
+      }
+      const buffer = Buffer.from(await photoFile.arrayBuffer());
+      await db.insert(animalPhotos).values({
+        animalId: newAnimal.id,
+        fileName: photoFile.name,
+        mimeType: photoFile.type,
+        fileSize: photoFile.size,
+        photoData: buffer,
+      });
+    }
+
+    return Astro.redirect(`/animals/${newAnimal.id}`);
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Error al guardar';
+  }
+}
+
+const preselectedOwnerId = Astro.url.searchParams.get('ownerId') ?? '';
+
+const ownerList = await db
+  .select({ id: owners.id, name: owners.name })
+  .from(owners)
+  .orderBy(owners.name);
+
+const animalList = await db
+  .select({ id: animals.id, code: animals.code, name: animals.name, species: animals.species, sex: animals.sex })
+  .from(animals)
+  .orderBy(animals.code);
+---
+
+<Layout title="Nuevo animal">
+  <div class="space-y-5">
+
+    <div class="flex items-center gap-2">
+      <a href="/animals" class="btn btn-ghost btn-sm btn-square">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="text-xl font-bold">Registrar animal</h1>
+    </div>
+
+    {error && <div class="alert alert-error text-sm"><span>{error}</span></div>}
+
+    <form method="POST" enctype="multipart/form-data" class="space-y-4">
+
+      <!-- Datos básicos -->
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5 space-y-4">
+          <h2 class="font-semibold text-base border-b border-base-300 pb-2">Datos básicos</h2>
+
+          <div class="flex flex-col gap-1.5">
+            <label class="text-sm font-medium">Dueño</label>
+            <select name="owner_id" class="select select-bordered w-full">
+              <option value="">Sin dueño asignado</option>
+              {ownerList.map((o) => (
+                <option value={o.id} selected={preselectedOwnerId === String(o.id)}>{o.name}</option>
+              ))}
+            </select>
+            {ownerList.length === 0 && (
+              <p class="text-xs text-warning mt-0.5">
+                No hay dueños. <a href="/owners/new" class="link">Crear dueño</a>
+              </p>
+            )}
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Código</label>
+              <input type="text" name="code" class="input input-bordered w-full" placeholder="Auto (001, 002...)" />
+              <span class="text-xs text-base-content/40">Dejar vacío para asignar automáticamente</span>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Nombre</label>
+              <input type="text" name="name" class="input input-bordered w-full" placeholder="Opcional" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Especie *</label>
+              <select name="species" class="select select-bordered w-full" required>
+                <option value="bovine" selected>Bovino</option>
+                <option value="equine">Equino</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Sexo *</label>
+              <select name="sex" class="select select-bordered w-full" required>
+                <option value="">Seleccionar...</option>
+                <option value="female">Hembra</option>
+                <option value="male">Macho</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Raza</label>
+              <input type="text" name="breed" class="input input-bordered w-full" placeholder="Holstein" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Fecha nacimiento</label>
+              <input type="date" name="birth_date" class="input input-bordered w-full" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Peso (kg)</label>
+              <input type="number" step="0.1" name="current_weight" class="input input-bordered w-full" placeholder="450.5" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Señas / color</label>
+              <input type="text" name="marks" class="input input-bordered w-full" placeholder="Pinto negro" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Genealogía -->
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5 space-y-4">
+          <h2 class="font-semibold text-base border-b border-base-300 pb-2">Genealogía</h2>
+
+          <!-- Padre -->
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-sm font-medium">Padre</label>
+              <label class="flex items-center gap-1.5 text-xs text-base-content/60 cursor-pointer">
+                <input type="checkbox" class="checkbox checkbox-xs" id="father-free-toggle" />
+                No está en el sistema
+              </label>
+            </div>
+            <!-- Selector de animal -->
+            <div id="father-select-wrap">
+              <select name="father_animal_id" class="select select-bordered w-full">
+                <option value="">Sin padre registrado</option>
+                {animalList.map((a) => (
+                  <option value={a.id}>
+                    {speciesIcon[a.species]} {a.name ? `${a.name} (${a.code})` : a.code} — {sexLabel[a.sex] ?? a.sex}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <!-- Texto libre (oculto por defecto) -->
+            <div id="father-text-wrap" class="hidden">
+              <input type="text" name="father_text" class="input input-bordered w-full" placeholder="Nombre o código del padre" />
+            </div>
+          </div>
+
+          <!-- Madre -->
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <label class="text-sm font-medium">Madre</label>
+              <label class="flex items-center gap-1.5 text-xs text-base-content/60 cursor-pointer">
+                <input type="checkbox" class="checkbox checkbox-xs" id="mother-free-toggle" />
+                No está en el sistema
+              </label>
+            </div>
+            <!-- Selector de animal -->
+            <div id="mother-select-wrap">
+              <select name="mother_animal_id" class="select select-bordered w-full">
+                <option value="">Sin madre registrada</option>
+                {animalList.map((a) => (
+                  <option value={a.id}>
+                    {speciesIcon[a.species]} {a.name ? `${a.name} (${a.code})` : a.code} — {sexLabel[a.sex] ?? a.sex}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <!-- Texto libre (oculto por defecto) -->
+            <div id="mother-text-wrap" class="hidden">
+              <input type="text" name="mother_text" class="input input-bordered w-full" placeholder="Nombre o código de la madre" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Observaciones -->
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-base border-b border-base-300 pb-2 mb-3">Observaciones</h2>
+          <textarea name="notes" class="textarea textarea-bordered w-full" rows="3" placeholder="Notas adicionales..."></textarea>
+        </div>
+      </div>
+
+      <!-- Foto -->
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-5 space-y-3">
+          <h2 class="font-semibold text-base border-b border-base-300 pb-2">Foto <span class="text-base-content/40 font-normal text-sm">(opcional)</span></h2>
+
+          <div class="flex flex-col gap-1.5">
+            <input
+              type="file"
+              name="photo"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              class="file-input file-input-bordered w-full"
+              id="photo-input"
+            />
+            <span class="text-xs text-base-content/40">JPG, PNG o WebP · Máximo 5MB</span>
+          </div>
+
+          <!-- Preview -->
+          <div id="preview-container" class="hidden">
+            <img id="preview-img" src="" alt="preview" class="w-32 h-32 object-cover rounded-xl" />
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-soft btn-primary w-full text-base">
+        Guardar animal
+      </button>
+
+    </form>
+  </div>
+</Layout>
+
+<script>
+  function setupParentToggle(
+    checkboxId: string,
+    selectWrapId: string,
+    textWrapId: string,
+    selectName: string,
+    textName: string
+  ) {
+    const checkbox   = document.getElementById(checkboxId) as HTMLInputElement;
+    const selectWrap = document.getElementById(selectWrapId)!;
+    const textWrap   = document.getElementById(textWrapId)!;
+    const select     = selectWrap.querySelector('select') as HTMLSelectElement;
+    const input      = textWrap.querySelector('input') as HTMLInputElement;
+
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectWrap.classList.add('hidden');
+        textWrap.classList.remove('hidden');
+        select.value = '';         // limpia selección
+        select.disabled = true;
+        input.disabled = false;
+      } else {
+        selectWrap.classList.remove('hidden');
+        textWrap.classList.add('hidden');
+        input.value = '';          // limpia texto
+        input.disabled = true;
+        select.disabled = false;
+      }
+    });
+  }
+
+  setupParentToggle('father-free-toggle', 'father-select-wrap', 'father-text-wrap', 'father_animal_id', 'father_text');
+  setupParentToggle('mother-free-toggle', 'mother-select-wrap', 'mother-text-wrap', 'mother_animal_id', 'mother_text');
+
+  // Preview de foto
+  const photoInput = document.getElementById('photo-input') as HTMLInputElement;
+  const previewContainer = document.getElementById('preview-container');
+  const previewImg = document.getElementById('preview-img') as HTMLImageElement;
+
+  photoInput?.addEventListener('change', () => {
+    const file = photoInput.files?.[0];
+    if (!file || !previewContainer || !previewImg) return;
+    previewImg.src = URL.createObjectURL(file);
+    previewContainer.classList.remove('hidden');
+  });
+</script>

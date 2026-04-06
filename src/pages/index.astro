@@ -1,0 +1,119 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { db } from '../lib/db/index';
+import { animals, medicalRecords, milkProduction } from '../lib/db/schema';
+import { eq, count, and, gte, lte } from 'drizzle-orm';
+
+// Estadísticas básicas
+const [totalAnimals] = await db.select({ count: count() }).from(animals);
+const [totalBovinos] = await db
+  .select({ count: count() })
+  .from(animals)
+  .where(eq(animals.species, 'bovine'));
+const [totalEquinos] = await db
+  .select({ count: count() })
+  .from(animals)
+  .where(eq(animals.species, 'equine'));
+
+// Controles médicos próximos (en los siguientes 30 días)
+const today = new Date().toISOString().split('T')[0];
+const next30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+const upcomingChecks = await db
+  .select({
+    id: medicalRecords.id,
+    animalId: medicalRecords.animalId,
+    nextCheckDate: medicalRecords.nextCheckDate,
+    recordType: medicalRecords.recordType,
+  })
+  .from(medicalRecords)
+  .where(
+    and(
+      gte(medicalRecords.nextCheckDate, today),
+      lte(medicalRecords.nextCheckDate, next30)
+    )
+  )
+  .limit(5);
+---
+
+<Layout title="Inicio">
+  <div class="space-y-4">
+    <!-- Encabezado -->
+    <div class="pt-2">
+      <h1 class="text-2xl font-bold text-base-content">Bienvenido</h1>
+      <p class="text-base-content/60 text-sm">Control de ganado y caballos</p>
+    </div>
+
+    <!-- Stats resumen -->
+    <div class="grid grid-cols-3 gap-3">
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 text-center">
+          <div class="text-3xl font-bold text-primary">{totalAnimals.count}</div>
+          <div class="text-xs text-base-content/60">Total</div>
+        </div>
+      </div>
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 text-center">
+          <div class="text-3xl font-bold text-secondary">{totalBovinos.count}</div>
+          <div class="text-xs text-base-content/60">Bovinos</div>
+        </div>
+      </div>
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4 text-center">
+          <div class="text-3xl font-bold text-accent">{totalEquinos.count}</div>
+          <div class="text-xs text-base-content/60">Equinos</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Accesos rápidos -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <h2 class="card-title text-base">Acciones rápidas</h2>
+        <div class="grid grid-cols-2 gap-2 mt-1">
+          <a href="/animals/new" class="btn btn-soft btn-primary btn-sm">
+            + Registrar animal
+          </a>
+          <a href="/animals" class="btn btn-soft btn-sm">
+            Ver animales
+          </a>
+          <a href="/medical/new" class="btn btn-soft btn-sm">
+            + Control médico
+          </a>
+          <a href="/milk/new" class="btn btn-soft btn-sm">
+            + Producción leche
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Próximos controles médicos -->
+    {upcomingChecks.length > 0 && (
+      <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+          <h2 class="card-title text-base">
+            <span class="badge badge-warning badge-sm">!</span>
+            Próximos controles
+          </h2>
+          <div class="space-y-2 mt-1">
+            {upcomingChecks.map((check) => (
+              <div class="flex items-center justify-between text-sm">
+                <span class="capitalize">{check.recordType}</span>
+                <span class="text-base-content/60">{check.nextCheckDate}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {totalAnimals.count === 0 && (
+      <div class="alert alert-info">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <span>No hay animales registrados. ¡Comienza registrando el primero!</span>
+      </div>
+    )}
+  </div>
+</Layout>

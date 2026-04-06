@@ -1,0 +1,126 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { db } from '../../lib/db/index';
+import { owners, animals } from '../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { speciesIcon, statusLabel, statusBadgeClass, sexLabel } from '../../lib/labels';
+
+const { id } = Astro.params;
+const ownerId = parseInt(id ?? '0');
+if (!ownerId) return Astro.redirect('/owners');
+
+const [owner] = await db.select().from(owners).where(eq(owners.id, ownerId));
+if (!owner) return Astro.redirect('/owners');
+
+const animalList = await db
+  .select()
+  .from(animals)
+  .where(eq(animals.ownerId, ownerId))
+  .orderBy(animals.code);
+
+// Manejo de edición
+let error = '';
+if (Astro.request.method === 'POST') {
+  try {
+    const form = await Astro.request.formData();
+    const name = form.get('name')?.toString().trim() ?? '';
+    const phone = form.get('phone')?.toString().trim() || null;
+    const email = form.get('email')?.toString().trim() || null;
+    const notes = form.get('notes')?.toString().trim() || null;
+
+    if (!name) throw new Error('El nombre es obligatorio');
+
+    await db.update(owners).set({ name, phone, email, notes, updatedAt: new Date() }).where(eq(owners.id, ownerId));
+    return Astro.redirect(`/owners/${ownerId}`);
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Error al guardar';
+  }
+}
+---
+
+<Layout title={owner.name}>
+  <div class="space-y-4">
+    <div class="flex items-center gap-2">
+      <a href="/owners" class="btn btn-ghost btn-sm btn-square">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+        </svg>
+      </a>
+      <h1 class="text-xl font-bold">{owner.name}</h1>
+    </div>
+
+    {error && <div class="alert alert-error"><span>{error}</span></div>}
+
+    <!-- Datos del dueño (editable inline) -->
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <details>
+          <summary class="font-semibold cursor-pointer select-none">Editar datos</summary>
+          <form method="POST" class="space-y-4 mt-4">
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Nombre *</label>
+              <input type="text" name="name" class="input input-bordered w-full" value={owner.name} required />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Teléfono</label>
+              <input type="tel" name="phone" class="input input-bordered w-full" value={owner.phone ?? ''} />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Correo</label>
+              <input type="email" name="email" class="input input-bordered w-full" value={owner.email ?? ''} />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label class="text-sm font-medium">Notas</label>
+              <textarea name="notes" class="textarea textarea-bordered w-full" rows="2">{owner.notes ?? ''}</textarea>
+            </div>
+            <button type="submit" class="btn btn-soft btn-primary btn-sm w-full">Guardar cambios</button>
+          </form>
+        </details>
+
+        <div class="text-sm text-base-content/60 space-y-1 mt-3">
+          {owner.phone && <div>📞 {owner.phone}</div>}
+          {owner.email && <div>✉️ {owner.email}</div>}
+          {owner.notes && <div class="text-xs mt-1">{owner.notes}</div>}
+        </div>
+      </div>
+    </div>
+
+    <!-- Animales del dueño -->
+    <div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">
+          Animales
+          <span class="badge badge-outline badge-sm ml-1">{animalList.length}</span>
+        </h2>
+        <a href={`/animals/new?ownerId=${owner.id}`} class="btn btn-soft btn-xs">+ Asignar animal</a>
+      </div>
+
+      {animalList.length === 0 ? (
+        <div class="text-center py-8 text-base-content/40 text-sm">
+          Este dueño no tiene animales registrados
+        </div>
+      ) : (
+        <div class="space-y-2">
+          {animalList.map((animal) => (
+            <a href={`/animals/${animal.id}`} class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow block">
+              <div class="card-body p-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span>{speciesIcon[animal.species]}</span>
+                    <div>
+                      <div class="font-medium text-sm">{animal.name ?? animal.code}</div>
+                      <div class="text-xs text-base-content/50">{animal.code} · {sexLabel[animal.sex] ?? animal.sex}</div>
+                    </div>
+                  </div>
+                  <span class={`badge badge-sm ${statusBadgeClass[animal.status] ?? 'badge-neutral'}`}>
+                    {statusLabel[animal.status] ?? animal.status}
+                  </span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  </div>
+</Layout>
