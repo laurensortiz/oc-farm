@@ -7,6 +7,9 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   output: 'server',
   adapter: node({ mode: 'standalone' }),
+  security: {
+    checkOrigin: false,
+  },
   vite: {
     plugins: [
       tailwindcss(),
